@@ -14,10 +14,11 @@ HIP_PLATFORM = $(shell hipconfig --platform)
 
 GPU_CC = hipcc
 ifeq (${HIP_PLATFORM}, nvidia)
-ARCH := sm_80
-HIP_PATH := /global/common/software/nersc/easybuild/perlmutter/21.10/software/hip/5.3.2
+GPU_CC = nvcc
+ARCH := sm_80 #update the ARCH based on the current platform 
 HIP_BACKEND = __HIP_PLATFORM_NVIDIA__
-GPU_FLAGS := -g -O3 -lineinfo -arch $(ARCH) -Wno-deprecated-gpu-targets -Xcompiler "$(CFLAGS)" -D__OFFLOAD_HIP -D$(HIP_BACKEND)
+GPU_FLAGS := -g -O3 -lineinfo -arch $(ARCH) -Wno-deprecated-gpu-targets -Xcompiler "$(CFLAGS)" -D__OFFLOAD_CUDA
+CFLAGS += -D__OFFLOAD_CUDA
 else ifeq (${HIP_PLATFORM}, amd)
 ARCH := gfx90a
 HIP_PATH := $(ROCM_PATH)
@@ -49,23 +50,31 @@ ALL_OBJECTS := ../offload/offload_library.o \
         dbm_mpi.o \
         dbm_multiply.o \
         dbm_multiply_comm.o \
-        dbm_multiply_cpu.o \
         dbm_shard.o
 
+OBJECT_C := dbm_multiply_cpu.o
 
+ifeq (${HIP_PLATFORM}, amd)
 CFLAGS += -I${HIP_PATH}/include -D__OFFLOAD_HIP -D$(HIP_BACKEND)
+endif
+
 ALL_OBJECTS += dbm_multiply_gpu.o
 ALL_OBJECTS += $(OBJECT_C)
 
+ifeq (${HIP_PLATFORM}, nvidia)
+LIBS += -lcudart
+%.o: %.cu $(ALL_HEADERS)
+	cd $(dir $<); $(GPU_CC) -c $(GPU_FLAGS) $(notdir $<)
+else
 %.o: %.cpp $(ALL_HEADERS)
 	cd $(dir $<); $(GPU_CC) -c $(GPU_FLAGS) $(notdir $<)
-
+endif
 
 %.o: %.c $(ALL_HEADERS)
-	cd $(dir $<); $(GPU_CC) -c $(CFLAGS) $(GPU_FLAGS) $(notdir $<)
+	cd $(dir $<); $(CC) -c $(CFLAGS) $(notdir $<)
 
 $(OBJECT_C): dbm_multiply_cpu.c
-	cd $(dir $<); $(GPU_CC) -c $(CFLAGS) $(GPU_FLAGS) $(notdir $<)
+	cd $(dir $<); $(CC) -c $(CFLAGS) $(notdir $<)
 
 dbm_miniapp.x: dbm_multiply_gpu_kernel.o dbm_miniapp.o $(ALL_OBJECTS)
 	$(GPU_CC) $(CFLAGS) -o $@ $^ $(LIBS)
